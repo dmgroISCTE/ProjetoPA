@@ -1,17 +1,13 @@
-import java.util.*
 import kotlin.reflect.KClass
-import kotlin.reflect.full.declaredMemberFunctions
-import kotlin.reflect.full.findAnnotation
-import kotlin.reflect.full.hasAnnotation
-import kotlin.test.assertTrue
+import kotlin.reflect.full.declaredMemberProperties
 
-abstract class JsonElements(name : String) {
+abstract class JsonElements() {
 
     abstract fun accept(v: Visitor)
     abstract fun generate() : Any
 }
 
-class JSON(val name : String, var objList: MutableList<JsonObject> = mutableListOf<JsonObject>()) : JsonElements("JSON") {
+class JSON(var objList: MutableList<JsonObject> = mutableListOf<JsonObject>()) : JsonElements() {
 
     override fun accept(v: Visitor) {
         v.visit(this)
@@ -29,10 +25,12 @@ class JSON(val name : String, var objList: MutableList<JsonObject> = mutableList
     }
 }
 
-class JsonValue(val name : String, val value : JsonElements) : JsonElements("Value") {
+class JsonValue(val name : String, val value : JsonElements?) : JsonElements() {
 
     override fun accept(v: Visitor) {
         v.visit(this)
+        value?.accept(v)
+        v.endVisit(this)
     }
 
     override fun generate(): String {
@@ -60,10 +58,10 @@ class JsonValue(val name : String, val value : JsonElements) : JsonElements("Val
             }
         }
         return ""
-
     }
+
 }
-class JsonString(val content: String) : JsonElements("String") {
+class JsonString(val content: String) : JsonElements() {
 
     override fun accept(v: Visitor) {
         v.visit(this)
@@ -75,7 +73,7 @@ class JsonString(val content: String) : JsonElements("String") {
 
 }
 
-class JsonNumber(val number : Float) : JsonElements("Number") {
+class JsonNumber(val number : Number) : JsonElements() {
 
     override fun accept(v: Visitor) {
         v.visit(this)
@@ -87,7 +85,7 @@ class JsonNumber(val number : Float) : JsonElements("Number") {
 
 }
 
-class JsonObject(var listValue : MutableList<JsonValue>) : JsonElements("Object") {
+class JsonObject(var listValue : MutableList<JsonValue>) : JsonElements() {
 
     fun addValue(value: JsonValue) {
         listValue.add(value)
@@ -102,7 +100,9 @@ class JsonObject(var listValue : MutableList<JsonValue>) : JsonElements("Object"
         listValue.forEach {
             it.accept(v)
         }
+        v.endVisit(this)
     }
+
 
     override fun generate(): String {
         var objgenerate = "{\n"
@@ -116,33 +116,35 @@ class JsonObject(var listValue : MutableList<JsonValue>) : JsonElements("Object"
         objgenerate += "}"
         return objgenerate
     }
+
 }
 
-class JsonArray(var array : MutableList<JsonValue>) : JsonElements("Array") {
+class JsonArray(var array: MutableList<JsonValue>) : JsonElements() {
 
     override fun accept(v: Visitor) {
         v.visit(this)
         array.forEach {
             it.accept(v)
         }
+        v.endVisit(this)
     }
 
     override fun generate(): String {
-        var arrayaux : String = "["
+        var arrayaux : String = "[\n"
         array.forEach {
             arrayaux += if (it == array.last()){
-                "${it.generate()}"
+                "${it.value?.generate()}"
             } else {
-                "${it.generate()}" + ", "
+                "${it.value?.generate()}" + ",\n "
             }
         }
-        arrayaux += "]"
+        arrayaux += "\n]"
         return arrayaux
     }
 
 }
 
-class JsonBoolean(val boolean : Boolean) : JsonElements("Boolean") {
+class JsonBoolean(val boolean : Boolean) : JsonElements() {
     override fun accept(v: Visitor) {
         v.visit(this)
     }
@@ -158,57 +160,29 @@ class JsonBoolean(val boolean : Boolean) : JsonElements("Boolean") {
 fun printStrings(json : JsonElements) : String{
     val v = object : Visitor{
         var text : String = ""
-        override fun visit(jsonObj : JsonObject) { text += printStringObject(jsonObj) }
+        override fun visit(jsonObj : JsonValue) {
+            when(jsonObj.value){
+                is JsonString -> { text += jsonObj.value.generate() + "\n" }
+                is JsonArray -> { text += printStrings(jsonObj.value) }
+                is JsonObject -> { text += printStrings(jsonObj.value) }
+            }
+        }
     }
     json.accept(v)
     return v.text
 }
 
-// Função auxiliar para obter todas as strings num objecto
-private fun printStringObject(obj : JsonObject) : String{
-    val v = object : Visitor{
-        var text : String = ""
-        override fun visit(jsonValue: JsonValue) {
-            when(jsonValue.value){
-                is JsonString -> { text += jsonValue.value.generate() + "\n" }
-                is JsonArray -> { text += printStringArray(jsonValue.value) }
-                is JsonObject -> { text += printStringObject(jsonValue.value) }
-            }
-        }
-    }
-    obj.accept(v)
-    return v.text
-}
-
-// Função auxiliar para obter todas as strings num array
-private fun printStringArray(array : JsonArray) : String{
-    val v = object : Visitor{
-        var text : String = ""
-        override fun visit(jsonValue: JsonValue) {
-            when(jsonValue.value){
-                is JsonString -> { text += jsonValue.value.generate() + "\n" }
-                is JsonArray -> { text += printStringArray(jsonValue.value) }
-                is JsonObject -> { text += printStringObject(jsonValue.value) }
-            }
-        }
-    }
-    array.accept(v)
-    return v.text
-}
 
 // Procurar um objeto conforme a pesquisa
-//TODO Fix some bugs
 fun find(json : JsonElements, campo : JsonValue) : String{
     val v = object : Visitor {
         var text : String = ""
         override fun visit(obj : JsonObject) {
             obj.getList().forEach {
-                if (it.value == campo.value) {
-                    text += obj.generate() + "\n"
-                } else if (it.value is JsonObject){
-                    find(it, campo)
-                } else if (it.value is JsonArray){
-                    find(it, campo)
+                when (it.value){
+                    campo.value -> { text += obj.generate() + "\n" }
+                    is JsonObject -> { find(it, campo) }
+                    is JsonArray -> { find(it, campo) }
                 }
             }
         }
@@ -219,13 +193,8 @@ fun find(json : JsonElements, campo : JsonValue) : String{
 
 // *************************************
 
-interface TypeMapping {
-    fun mapType(c: KClass<*>): String
-    fun mapObject(o: Any?): JsonObject
-}
 
 interface Visitor{
-   // fun visit(element : JsonElements) { }
     fun visit(jsonString : JsonString) { }
     fun visit(jsonNumber : JsonNumber) { }
     fun visit(jsonArray : JsonArray) { }
@@ -233,118 +202,135 @@ interface Visitor{
     fun visit(jsonBoolean : JsonBoolean) { }
     fun visit(jsonValue : JsonValue) { }
     fun visit(json : JSON) { }
+    fun endVisit(jsonObject: JsonObject) { }
+    fun endVisit(jsonArray: JsonArray) { }
+    fun endVisit(jsonValue: JsonValue) { }
 }
 
-class RefJson : TypeMapping {
-    override fun mapType(c: KClass<*>): String =
-        when(c){
-            Float::class -> "JsonNumber"
-            Boolean::class -> "JsonBoolean"
-            String::class -> "JsonString"
-            MutableList::class -> "JsonArray"
 
-            else -> "Undefined"
+fun convertTo(o: Any): JsonElements? {
+    var swap : JsonElements? = null
+    if (o::class.isData){
+        swap = convertDataClass(o)
+    } else {
+        when (o) {
+            is Number -> swap = JsonNumber(o)
+            is Boolean -> swap = JsonBoolean(o)
+            is String -> swap = JsonString(o)
+            is Collection<*> -> swap = convertArrayTo(o)
+            is Map<*, *> -> swap = convertMapTo(o)
+            //o::class.isData -> swap = convertDataClass(o) Dentro do When não funciona?
+
         }
+    }
+    return swap
+}
 
-    override fun mapObject(o: Any?): JsonObject {
-        TODO()
+fun convertArrayTo(array: Collection<*>): JsonArray {
+
+    var list = mutableListOf<JsonValue>()
+    var toAdd : JsonValue
+    array.forEach {
+        toAdd = JsonValue("", convertTo(it!!) )
+        list.add(toAdd)
+    }
+
+    return JsonArray(list)
+}
+
+fun convertMapTo(map: Map<*,*>): JsonObject{
+
+    var list = mutableListOf<JsonValue>()
+    var toAdd : JsonValue
+
+    map.forEach { (x, y) -> toAdd = JsonValue(x as String, convertTo(y!!))
+            list.add(toAdd)
+    }
+
+    return JsonObject(list)
+}
+
+
+fun convertDataClass(d: Any) : JsonObject{
+    var list = mutableListOf<JsonValue>()
+
+    d::class.declaredMemberProperties.forEach {
+        val value = JsonValue(it.name, convertTo(it.call(d)!!))
+        list.add(value)
+    }
+
+    return JsonObject(list)
+}
+
+
+enum class PersonSign {
+    Aries, Taurus, Gemini, Cancer;
+
+    companion object {
+        fun values() = PersonSign.values()
     }
 }
 
-class JSONGenerator(var typeMapping: TypeMapping) {
 
-}
+@Target(AnnotationTarget.PROPERTY)
+annotation class Name
+@Target(AnnotationTarget.PROPERTY)
+annotation class Age
+@Target(AnnotationTarget.PROPERTY)
+annotation class Hobbies
+@Target(AnnotationTarget.PROPERTY)
+annotation class License
 
 
+data class Person(@Name val personName : String, @Age val number: Int, @Hobbies val hobby: String, @License val license: Boolean)
 
 
-fun main(){
+fun main() {
 
     //CRIAR UM JSON SIMPLES
-    var list = mutableListOf<JsonValue>()
-    var listarray = mutableListOf<JsonValue>()
+    val list = mutableListOf<JsonValue>()
+    val mapa = mutableMapOf<String, Any>()
 
-    val nome = JsonValue("Nome", JsonString("Rafael"))
-    val hobbies = JsonValue("Hobbies", JsonString("Viagens e Pesca"))
-    val idade = JsonValue("Idade", JsonNumber(28F))
-    val carta = JsonValue("Licença", JsonBoolean(true))
-    val array = JsonValue("Lista", JsonArray(listarray))
+    val nome = JsonValue("Nome", convertTo("Eu"))
+    val hobbies = JsonValue("Hobbies", convertTo("Viagens e Pesca"))
+    val idade = JsonValue("Idade", convertTo(28))
+    val carta = JsonValue("Licença", convertTo(true))
+
+    mapa["Nome"] = "Diogo"
+    mapa["Idade"] = 28
+    mapa["Lista"] = listOf("Nao sei", true)
+    val objeto = JsonValue("MapaObjeto", convertMapTo(mapa))
+    val person = Person("Diogo", 22, "Viajar", true)
+
+    val personJson = JsonValue("Pessoa", convertTo(person))
+
+    val listaTeste = listOf("Diogo", 22)
+    val array = JsonValue("Lista", convertTo(listaTeste))
+
 
     list.add(nome)
     list.add(hobbies)
     list.add(idade)
     list.add(carta)
     list.add(array)
-    listarray.add(nome)
-    listarray.add(idade)
+    list.add(objeto)
+    list.add(personJson)
 
     val pessoa1 = JsonObject(list)
 
     var listObj = mutableListOf<JsonObject>()
     listObj.add(pessoa1)
+    listObj.add(convertDataClass(person))
 
-    val json = JSON("JSON", listObj)
+    val json = JSON(listObj)
+
 
     println(json.generate())
-/*
-    //JSON MAIS COMPLEXO
 
-    var list = mutableListOf<JsonValue>()
-    var listarray = mutableListOf<JsonValue>()
-    var listarray2 = mutableListOf<JsonValue>()
+    //JsonTree().open(json) Fase 3
+    val w = InjectorAdd.create(JsonTree::class) // substituir por criacao com injecao - Fase 4
+    w.open(json)
 
-    val nome = JsonValue("Nome", JsonString("nome1"))
-    val idade = JsonValue("Idade", JsonNumber(30F))
-    val adulto = JsonValue("Adulto", JsonBoolean(true))
-    val array = JsonValue("Array", JsonArray(listarray))
-    val segundoArray = JsonValue("Segundo Array", JsonArray(listarray2))
-
-    list.add(nome)
-    list.add(idade)
-    list.add(adulto)
-    list.add(array)
-
-    listarray.add(nome)
-    listarray.add(idade)
-    listarray.add(adulto)
-    listarray.add(segundoArray)
-
-    listarray2.add(nome)
-
-    // OBJECTO 1
-    val pessoa1 = JsonObject(list)
-
-    var list2 = mutableListOf<JsonValue>()
-
-    val nome2 = JsonValue("Nome", JsonString("nome2"))
-    val idade2 = JsonValue("Idade", JsonNumber(15F))
-    val adulto2 = JsonValue("Adulto", JsonBoolean(false))
-
-    list2.add(nome2)
-    list2.add(idade2)
-    list2.add(adulto2)
-
-    val pessoa2 = JsonObject(list2)
-
-    // OBJECTO 2
-    val pessoaObj = JsonValue("Nome2", pessoa2)
-    listarray.add(pessoaObj)
-
-    var listObj = mutableListOf<JsonObject>()
-    listObj.add(pessoa1)
-    listObj.add(pessoa2)
-
-    val json = JSON("JSON", listObj)
-    println(json.generate())
-
-    println("********************************************************************\n")
-
-    println(printStrings(json))
-
-    println("********************************************************************\n")
-
-    println(find(json, nome))
-*/
 
 
 }

@@ -29,7 +29,7 @@ class JsonElementsKtTest {
         var listObj = mutableListOf<JsonObject>()
         listObj.add(pessoa1)
 
-        val json = JSON("JSON", listObj)
+        val json = JSON(listObj)
 
         assertEquals( "{\n" +
                 " \"Nome\" : \"Rafael\"  ,\n" +
@@ -91,7 +91,7 @@ class JsonElementsKtTest {
         listObj.add(pessoa1)
         listObj.add(pessoa2)
 
-        val json = JSON("JSON", listObj)
+        val json = JSON(listObj)
 
 
         kotlin.test.assertEquals("\"nome1\"\n\"nome1\"\n\"nome1\"\n\"nome2\"\n\"nome2\"\n" , printStrings(json))
